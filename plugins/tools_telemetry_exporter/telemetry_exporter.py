@@ -162,6 +162,10 @@ class ToolsTelemetryExporterPlugin(Plugin):
 
         try:
             tracer = trace.get_tracer(__name__)
+            current_span = trace.get_current_span()
+            if not current_span or not current_span.is_recording():
+                logger.warning("ToolsTelemetryExporter: No active span found. Skipping telemetry export.")
+                return
 
             with tracer.start_as_current_span(span_name) as span:
                 for key, value in attributes.items():
