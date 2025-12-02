@@ -1,0 +1,178 @@
+# -*- coding: utf-8 -*-
+"""Location: ./plugins/tools_telemetry_exporter/telemetry_exporter.py
+Copyright 2025
+SPDX-License-Identifier: Apache-2.0
+
+Tools Telemetry Exporter Plugin.
+This plugin exports comprehensive tool invocation telemetry to OpenTelemetry.
+"""
+
+# Standard
+from typing import Dict
+import json
+
+# First-Party
+from mcpgateway.plugins.framework import (Plugin,
+                                          PluginConfig,
+                                          PluginContext)
+from mcpgateway.plugins.framework.constants import GATEWAY_METADATA, TOOL_METADATA
+from mcpgateway.plugins.framework.hooks.tools import (
+    ToolPreInvokePayload,
+    ToolPreInvokeResult,
+    ToolPostInvokePayload,
+    ToolPostInvokeResult
+)
+from mcpgateway.common.models import Tool, Gateway
+from mcpgateway.services.logging_service import LoggingService
+
+
+# Initialize logging service first
+logging_service = LoggingService()
+logger = logging_service.get_logger(__name__)
+
+
+class ToolsTelemetryExporterPlugin(Plugin):
+    """Export comprehensive tool invocation telemetry to OpenTelemetry."""
+    def __init__(self,  config: PluginConfig):
+        super().__init__(config)
+        self.is_open_telemetry_available = self._is_open_telemetry_available()
+        self.telemetry_config = config.config
+
+    @staticmethod
+    def _is_open_telemetry_available() -> bool:
+        try:
+            # Third-Party
+            from opentelemetry import trace
+            from opentelemetry import context
+            return True
+        except ImportError:
+            logger.warning("ToolsTelemetryExporter: OpenTelemetry is not available. Telemetry export will be disabled.")
+            return False
+
+    @staticmethod
+    def _get_base_context_attributes(context: PluginContext) -> Dict:
+        global_context = context.global_context
+        return {
+            "request_id": global_context.request_id or "",
+            "user": global_context.user or "",
+            "tenant_id": global_context.tenant_id or "",
+            "server_id": global_context.server_id or "",
+        }
+
+    def _get_pre_invoke_context_attributes(self, context: PluginContext) -> Dict:
+        global_context = context.global_context
+        tool_metadata: Tool = global_context.metadata.get(TOOL_METADATA)
+        gateway_metadata: Gateway = global_context.metadata.get(GATEWAY_METADATA)
+
+        return {
+            **self._get_base_context_attributes(context),
+            "tool": {
+                "name": tool_metadata.name or "",
+                "target_tool_name": tool_metadata.original_name or "",
+                "description": tool_metadata.description or "",
+            },
+            "gateway": {
+                "id": gateway_metadata.id or "",
+                "name": gateway_metadata.name or "",
+                "target_mcp_server": str(gateway_metadata.url or ""),
+            }
+        }
+
+    def _get_post_invoke_context_attributes(self, context: PluginContext) -> Dict:
+        return {
+            **self._get_base_context_attributes(context),
+        }
+
+    async def tool_pre_invoke(self, payload: ToolPreInvokePayload, context: PluginContext) -> ToolPreInvokeResult:
+        """Capture pre-invocation telemetry for tools.
+
+        Args:
+            payload: The tool payload containing arguments.
+            context: Plugin execution context.
+
+        Returns:
+            Result with potentially modified tool arguments.
+        """
+        logger.info("ToolsTelemetryExporter: Capturing pre-invocation tool telemetry.")
+        context_attributes = self._get_pre_invoke_context_attributes(context)
+
+        export_attributes = {
+            "request_id": context_attributes["request_id"],
+            "user": context_attributes["user"],
+            "tenant_id": context_attributes["tenant_id"],
+            "server_id": context_attributes["server_id"],
+            "gateway.id": context_attributes["gateway"]["id"],
+            "gateway.name": context_attributes["gateway"]["name"],
+            "gateway.target_mcp_server": context_attributes["gateway"]["target_mcp_server"],
+            "tool.name": context_attributes["tool"]["name"],
+            "tool.target_tool_name": context_attributes["tool"]["target_tool_name"],
+            "tool.description": context_attributes["tool"]["description"],
+            "tool.invocation.args": json.dumps(payload.args),
+            "headers": payload.headers.model_dump_json()
+        }
+
+        await self._export_telemetry(attributes=export_attributes, span_name="tool.pre_invoke")
+        return ToolPreInvokeResult(continue_processing=True)
+
+    async def tool_post_invoke(self, payload: ToolPostInvokePayload, context: PluginContext) -> ToolPostInvokeResult:
+        """Capture post-invocation telemetry.
+
+         Args:
+             payload: Tool result payload containing the tool name and execution result.
+             context: Plugin context with state from pre-invoke hook.
+
+         Returns:
+             ToolPostInvokeResult allowing execution to continue.
+         """
+        logger.info("ToolsTelemetryExporter: Capturing post-invocation tool telemetry.")
+        context_attributes = self._get_post_invoke_context_attributes(context)
+
+        export_attributes = {
+            "request_id": context_attributes["request_id"],
+            "user": context_attributes["user"],
+            "tenant_id": context_attributes["tenant_id"],
+            "server_id": context_attributes["server_id"],
+        }
+
+        result = payload.result if payload.result else {}
+        has_error = result.get("isError", True)
+        if self.telemetry_config.get("export_full_payload", False) and not has_error:
+            max_payload_bytes_size = self.telemetry_config.get("max_payload_bytes_size", 10000)
+            result_content = result.get("content")
+            if result_content:
+                result_content_str = json.dumps(result_content, default=str)
+                if len(result_content_str) <= max_payload_bytes_size:
+                    export_attributes["tool.invocation.result"] = result_content_str
+                else:
+                    truncated_content = result_content_str[:max_payload_bytes_size]
+                    export_attributes["tool.invocation.result"] = truncated_content + "...<truncated>"
+            else:
+                export_attributes["tool.invocation.result"] = "<No content in result>"
+        export_attributes["tool.invocation.has_error"] = has_error
+
+        await self._export_telemetry(attributes=export_attributes, span_name="tool.post_invoke")
+        return ToolPostInvokeResult(continue_processing=True)
+
+
+    async def _export_telemetry(self, attributes: Dict, span_name: str) -> None:
+        """Export telemetry attributes to OpenTelemetry.
+
+        Args:
+            attributes: Dictionary of telemetry attributes to export.
+            span_name: Name of the OpenTelemetry span to create.
+        """
+        if not self.is_open_telemetry_available:
+            logger.debug("ToolsTelemetryExporter: OpenTelemetry not available. Skipping telemetry export.")
+            return
+
+        from opentelemetry import trace
+
+        try:
+            tracer = trace.get_tracer(__name__)
+
+            with tracer.start_as_current_span(span_name) as span:
+                for key, value in attributes.items():
+                    span.set_attribute(key, value)
+                logger.debug(f"ToolsTelemetryExporter: Exported telemetry for span '{span_name}' with attributes: {attributes}")
+        except Exception as e:
+            logger.error(f"ToolsTelemetryExporter: Error creating span '{span_name}': {e}", exc_info=True)
