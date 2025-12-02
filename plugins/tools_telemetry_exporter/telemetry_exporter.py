@@ -55,7 +55,7 @@ class ToolsTelemetryExporterPlugin(Plugin):
     def _get_pre_invoke_context_attributes(self, context: PluginContext) -> Dict:
         global_context = context.global_context
         tool_metadata: Tool = global_context.metadata.get(TOOL_METADATA)
-        gateway_metadata: Gateway = global_context.metadata.get(GATEWAY_METADATA)
+        target_mcp_server_metadata: Gateway = global_context.metadata.get(GATEWAY_METADATA)
 
         return {
             **self._get_base_context_attributes(context),
@@ -64,10 +64,10 @@ class ToolsTelemetryExporterPlugin(Plugin):
                 "target_tool_name": tool_metadata.original_name or "",
                 "description": tool_metadata.description or "",
             },
-            "gateway": {
-                "id": gateway_metadata.id or "",
-                "name": gateway_metadata.name or "",
-                "target_mcp_server": str(gateway_metadata.url or ""),
+            "target_mcp_server": {
+                "id": target_mcp_server_metadata.id or "",
+                "name": target_mcp_server_metadata.name or "",
+                "url": str(target_mcp_server_metadata.url or ""),
             },
         }
 
@@ -94,9 +94,9 @@ class ToolsTelemetryExporterPlugin(Plugin):
             "user": context_attributes["user"],
             "tenant_id": context_attributes["tenant_id"],
             "server_id": context_attributes["server_id"],
-            "gateway.id": context_attributes["gateway"]["id"],
-            "gateway.name": context_attributes["gateway"]["name"],
-            "gateway.target_mcp_server": context_attributes["gateway"]["target_mcp_server"],
+            "target_mcp_server.id": context_attributes["target_mcp_server"]["id"],
+            "target_mcp_server.name": context_attributes["target_mcp_server"]["name"],
+            "target_mcp_server.url": context_attributes["target_mcp_server"]["url"],
             "tool.name": context_attributes["tool"]["name"],
             "tool.target_tool_name": context_attributes["tool"]["target_tool_name"],
             "tool.description": context_attributes["tool"]["description"],
