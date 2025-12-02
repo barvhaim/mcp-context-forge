@@ -908,7 +908,7 @@ plugins:
     author: "Bar Haim"
     hooks: ["tool_pre_invoke", "tool_post_invoke"]
     tags: ["telemetry", "observability", "opentelemetry", "monitoring"]
-    mode: "permissive" # enforce | permissive | disabled
+    mode: "disabled" # enforce | permissive | disabled
     priority: 200  # Run late to capture all context
     conditions: []  # Apply to all tools
     config:
