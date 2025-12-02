@@ -34,6 +34,11 @@ class ToolsTelemetryExporterPlugin(Plugin):
 
     @staticmethod
     def _is_open_telemetry_available() -> bool:
+        """Check if OpenTelemetry is available for import.
+
+        Returns:
+            True if OpenTelemetry can be imported, False otherwise.
+        """
         try:
             # Third-Party
             from opentelemetry import trace  # noqa: F401  # pylint: disable=import-outside-toplevel,unused-import
@@ -45,6 +50,14 @@ class ToolsTelemetryExporterPlugin(Plugin):
 
     @staticmethod
     def _get_base_context_attributes(context: PluginContext) -> Dict:
+        """Extract base context attributes from plugin context.
+
+        Args:
+            context: Plugin execution context containing global context.
+
+        Returns:
+            Dictionary with base attributes (request_id, user, tenant_id, server_id).
+        """
         global_context = context.global_context
         return {
             "request_id": global_context.request_id or "",
@@ -54,6 +67,14 @@ class ToolsTelemetryExporterPlugin(Plugin):
         }
 
     def _get_pre_invoke_context_attributes(self, context: PluginContext) -> Dict:
+        """Extract pre-invocation context attributes including tool and gateway metadata.
+
+        Args:
+            context: Plugin execution context containing tool and gateway metadata.
+
+        Returns:
+            Dictionary with base attributes plus tool and target MCP server details.
+        """
         global_context = context.global_context
         tool_metadata: Tool = global_context.metadata.get(TOOL_METADATA)
         target_mcp_server_metadata: Gateway = global_context.metadata.get(GATEWAY_METADATA)
@@ -73,6 +94,14 @@ class ToolsTelemetryExporterPlugin(Plugin):
         }
 
     def _get_post_invoke_context_attributes(self, context: PluginContext) -> Dict:
+        """Extract post-invocation context attributes.
+
+        Args:
+            context: Plugin execution context.
+
+        Returns:
+            Dictionary with base context attributes for post-invocation telemetry.
+        """
         return {
             **self._get_base_context_attributes(context),
         }
