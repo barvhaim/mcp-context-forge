@@ -27,6 +27,7 @@ class ToolsTelemetryExporterPlugin(Plugin):
     """Export comprehensive tool invocation telemetry to OpenTelemetry."""
 
     def __init__(self, config: PluginConfig):
+        """Initialize the ToolsTelemetryExporterPlugin."""
         super().__init__(config)
         self.is_open_telemetry_available = self._is_open_telemetry_available()
         self.telemetry_config = config.config
